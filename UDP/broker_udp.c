@@ -144,7 +144,7 @@ int main(void) {
                 break;
 
             default:
-                printf("Tipo de mensaje no soportado: %u\n", packet.type);
+                printf("Tipo de mensaje no soportado: %u\n", paquete.type);
                 break;
         }
     }
