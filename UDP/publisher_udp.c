@@ -19,6 +19,23 @@ static void copiar_payload(char *destino, const char *origen) {
     destino[i] = '\0';
 }
 
+static const char *mensajes[] = {
+    "Inicio del partido\n",
+    "Gol al minuto 12\n",
+    "Tarjeta amarilla al numero 8\n",
+    "Cambio al minuto 28\n",
+    "Gol en contra al minuto 35\n",
+    "Fin del primer tiempo\n",
+    "Inicia el segundo tiempo\n",
+    "Gol de penal al minuto 54\n",
+    "Tarjeta roja al minuto 67\n",
+    "Cambio de portero al minuto 72\n",
+    "Gol al minuto 85\n",
+    "Final del partido\n"
+};
+
+#define NUM_MENSAJES ((int)(sizeof(mensajes) / sizeof(mensajes[0])))
+
 static int esperar_ack(int sockfd, unsigned int seq) {
     Packet paquete;
     struct sockaddr_in direccion_origen;
@@ -53,7 +70,6 @@ int main(void) {
     int sockfd;
     struct sockaddr_in direccion_broker;
     Packet paquete;
-    char entrada[BUFFER_SIZE];
     unsigned int seq = 1;
 
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -67,15 +83,15 @@ int main(void) {
     direccion_broker.sin_port = htons(UDP_PORT);
     inet_pton(AF_INET, "127.0.0.1", &direccion_broker.sin_addr);
 
-    printf("Publisher UDP listo. Escribe mensajes para publicar.\n");
+    printf("Publisher UDP listo. Enviando mensajes automaticamente.\n");
 
-    while (fgets(entrada, sizeof(entrada), stdin) != NULL) {
+    for (int indice = 0; indice < NUM_MENSAJES; indice++) {
         int ack_recibido = 0;
 
         memset(&paquete, 0, sizeof(paquete));
         paquete.type = MSG_TYPE_PUBLISH;
         paquete.seq = seq;
-        copiar_payload(paquete.payload, entrada);
+        copiar_payload(paquete.payload, mensajes[indice]);
 
         for (int intento = 0; intento <= MAX_RETRIES; intento++) {
             if (sendto(sockfd,
@@ -89,7 +105,7 @@ int main(void) {
             }
 
             if (esperar_ack(sockfd, seq)) {
-                printf("Mensaje publicado con ACK seq=%u\n", seq);
+                printf("Mensaje publicado con ACK seq=%u: %s", seq, mensajes[indice]);
                 ack_recibido = 1;
                 break;
             }
@@ -103,6 +119,7 @@ int main(void) {
             printf("No se recibio ACK final para seq=%u\n", seq);
         }
 
+        sleep(1);
         seq++;
     }
 
