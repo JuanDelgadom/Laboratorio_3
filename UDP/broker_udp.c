@@ -9,62 +9,73 @@
 
 typedef struct {
     struct sockaddr_in addr;
-    int active;
-} Subscriber;
+    int activo;
+} Suscriptor;
 
-static int same_endpoint(const struct sockaddr_in *a, const struct sockaddr_in *b) {
+static int mismo_extremo(const struct sockaddr_in *a, const struct sockaddr_in *b) {
     return a->sin_family == b->sin_family &&
            a->sin_port == b->sin_port &&
            a->sin_addr.s_addr == b->sin_addr.s_addr;
 }
 
-static void print_endpoint(const struct sockaddr_in *addr, const char *label) {
+static void imprimir_extremo(const struct sockaddr_in *addr, const char *etiqueta) {
     char ip[INET_ADDRSTRLEN];
 
     inet_ntop(AF_INET, &addr->sin_addr, ip, sizeof(ip));
-    printf("%s %s:%d\n", label, ip, ntohs(addr->sin_port));
+    printf("%s %s:%d\n", etiqueta, ip, ntohs(addr->sin_port));
 }
 
-static void add_subscriber(Subscriber subscribers[], const struct sockaddr_in *addr) {
-    int free_slot = -1;
+static void agregar_suscriptor(Suscriptor suscriptores[], const struct sockaddr_in *addr) {
+    int espacio_libre = -1;
 
     for (int i = 0; i < MAX_SUBSCRIBERS; i++) {
-        if (subscribers[i].active && same_endpoint(&subscribers[i].addr, addr)) {
+        if (suscriptores[i].activo && mismo_extremo(&suscriptores[i].addr, addr)) {
             return;
         }
 
-        if (!subscribers[i].active && free_slot == -1) {
-            free_slot = i;
+        if (!suscriptores[i].activo && espacio_libre == -1) {
+            espacio_libre = i;
         }
     }
 
-    if (free_slot == -1) {
+    if (espacio_libre == -1) {
         printf("No hay espacio para mas suscriptores\n");
         return;
     }
 
-    subscribers[free_slot].active = 1;
-    subscribers[free_slot].addr = *addr;
-    print_endpoint(addr, "Suscriptor registrado:");
+    suscriptores[espacio_libre].activo = 1;
+    suscriptores[espacio_libre].addr = *addr;
+    imprimir_extremo(addr, "Suscriptor registrado:");
 }
 
-static void copy_payload(char *dest, const char *src) {
+static void copiar_payload(char *destino, const char *origen) {
     int i = 0;
 
-    while (i < BUFFER_SIZE - 1 && src[i] != '\0') {
-        dest[i] = src[i];
+    while (i < BUFFER_SIZE - 1 && origen[i] != '\0') {
+        destino[i] = origen[i];
         i++;
     }
 
-    dest[i] = '\0';
+    destino[i] = '\0';
+}
+
+static void enviar_ack(int sockfd, const struct sockaddr_in *addr, unsigned int seq, char codigo_ack) {
+    Packet ack = {0};
+
+    ack.type = MSG_TYPE_ACK;
+    ack.seq = seq;
+    ack.payload[0] = codigo_ack;
+    ack.payload[1] = '\0';
+
+    sendto(sockfd, &ack, sizeof(ack), 0, (const struct sockaddr *)addr, sizeof(*addr));
 }
 
 int main(void) {
     int sockfd;
-    struct sockaddr_in server_addr, client_addr;
-    socklen_t client_len = sizeof(client_addr);
-    Subscriber subscribers[MAX_SUBSCRIBERS] = {0};
-    Packet packet;
+    struct sockaddr_in direccion_servidor, direccion_cliente;
+    socklen_t longitud_cliente = sizeof(direccion_cliente);
+    Suscriptor suscriptores[MAX_SUBSCRIBERS] = {0};
+    Packet paquete;
 
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0) {
@@ -72,12 +83,12 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_port = htons(UDP_PORT);
+    memset(&direccion_servidor, 0, sizeof(direccion_servidor));
+    direccion_servidor.sin_family = AF_INET;
+    direccion_servidor.sin_addr.s_addr = INADDR_ANY;
+    direccion_servidor.sin_port = htons(UDP_PORT);
 
-    if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+    if (bind(sockfd, (struct sockaddr *)&direccion_servidor, sizeof(direccion_servidor)) < 0) {
         perror("bind");
         close(sockfd);
         return EXIT_FAILURE;
@@ -86,46 +97,47 @@ int main(void) {
     printf("Broker UDP escuchando en puerto %d...\n", UDP_PORT);
 
     while (1) {
-        client_len = sizeof(client_addr);
-        ssize_t received = recvfrom(sockfd,
-                                    &packet,
+        longitud_cliente = sizeof(direccion_cliente);
+        ssize_t recibido = recvfrom(sockfd,
+                                    &paquete,
                                     sizeof(Packet),
                                     0,
-                                    (struct sockaddr *)&client_addr,
-                                    &client_len);
+                                    (struct sockaddr *)&direccion_cliente,
+                                    &longitud_cliente);
 
-        if (received < 0) {
+        if (recibido < 0) {
             perror("recvfrom");
             break;
         }
 
-        switch (packet.type) {
+        switch (paquete.type) {
             case MSG_TYPE_SUBSCRIBE:
-                add_subscriber(subscribers, &client_addr);
+                agregar_suscriptor(suscriptores, &direccion_cliente);
                 break;
 
             case MSG_TYPE_PUBLISH:
                 printf("Publicacion recibida seq=%u mensaje=%s\n",
-                       packet.seq,
-                       packet.payload);
+                       paquete.seq,
+                       paquete.payload);
+                enviar_ack(sockfd, &direccion_cliente, paquete.seq, 'P');
 
                 for (int i = 0; i < MAX_SUBSCRIBERS; i++) {
-                    Packet delivery = {0};
+                    Packet entrega = {0};
 
-                    if (!subscribers[i].active) {
+                    if (!suscriptores[i].activo) {
                         continue;
                     }
 
-                    delivery.type = MSG_TYPE_DATA;
-                    delivery.seq = packet.seq;
-                    copy_payload(delivery.payload, packet.payload);
+                    entrega.type = MSG_TYPE_DATA;
+                    entrega.seq = paquete.seq;
+                    copiar_payload(entrega.payload, paquete.payload);
 
                     if (sendto(sockfd,
-                               &delivery,
-                               sizeof(delivery),
+                               &entrega,
+                               sizeof(entrega),
                                0,
-                               (struct sockaddr *)&subscribers[i].addr,
-                               sizeof(subscribers[i].addr)) < 0) {
+                               (struct sockaddr *)&suscriptores[i].addr,
+                               sizeof(suscriptores[i].addr)) < 0) {
                         perror("sendto");
                     }
                 }

@@ -7,26 +7,26 @@
 
 #include "udp_common.h"
 
-static void send_subscribe(int sockfd, const struct sockaddr_in *broker_addr) {
-    Packet subscribe = {0};
+static void enviar_suscripcion(int sockfd, const struct sockaddr_in *direccion_broker) {
+    Packet suscripcion = {0};
 
-    subscribe.type = MSG_TYPE_SUBSCRIBE;
-    subscribe.payload[0] = 'S';
-    subscribe.payload[1] = '\0';
+    suscripcion.type = MSG_TYPE_SUBSCRIBE;
+    suscripcion.payload[0] = 'S';
+    suscripcion.payload[1] = '\0';
 
     sendto(sockfd,
-           &subscribe,
-           sizeof(subscribe),
+           &suscripcion,
+           sizeof(suscripcion),
            0,
-           (const struct sockaddr *)broker_addr,
-           sizeof(*broker_addr));
+           (const struct sockaddr *)direccion_broker,
+           sizeof(*direccion_broker));
 }
 
 int main(void) {
     int sockfd;
-    struct sockaddr_in local_addr, broker_addr, from_addr;
-    socklen_t from_len = sizeof(from_addr);
-    Packet packet;
+    struct sockaddr_in direccion_local, direccion_broker, direccion_origen;
+    socklen_t longitud_origen = sizeof(direccion_origen);
+    Packet paquete;
 
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0) {
@@ -34,44 +34,44 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
-    memset(&local_addr, 0, sizeof(local_addr));
-    local_addr.sin_family = AF_INET;
-    local_addr.sin_addr.s_addr = INADDR_ANY;
-    local_addr.sin_port = htons(0);
+    memset(&direccion_local, 0, sizeof(direccion_local));
+    direccion_local.sin_family = AF_INET;
+    direccion_local.sin_addr.s_addr = INADDR_ANY;
+    direccion_local.sin_port = htons(0);
 
-    if (bind(sockfd, (struct sockaddr *)&local_addr, sizeof(local_addr)) < 0) {
+    if (bind(sockfd, (struct sockaddr *)&direccion_local, sizeof(direccion_local)) < 0) {
         perror("bind");
         close(sockfd);
         return EXIT_FAILURE;
     }
 
-    memset(&broker_addr, 0, sizeof(broker_addr));
-    broker_addr.sin_family = AF_INET;
-    broker_addr.sin_port = htons(UDP_PORT);
-    inet_pton(AF_INET, "127.0.0.1", &broker_addr.sin_addr);
+    memset(&direccion_broker, 0, sizeof(direccion_broker));
+    direccion_broker.sin_family = AF_INET;
+    direccion_broker.sin_port = htons(UDP_PORT);
+    inet_pton(AF_INET, "127.0.0.1", &direccion_broker.sin_addr);
 
-    send_subscribe(sockfd, &broker_addr);
+    enviar_suscripcion(sockfd, &direccion_broker);
     printf("Subscriber UDP registrado.\n");
 
     while (1) {
-        from_len = sizeof(from_addr);
-        ssize_t received = recvfrom(sockfd,
-                                    &packet,
-                                    sizeof(packet),
+        longitud_origen = sizeof(direccion_origen);
+        ssize_t recibido = recvfrom(sockfd,
+                                    &paquete,
+                                    sizeof(paquete),
                                     0,
-                                    (struct sockaddr *)&from_addr,
-                                    &from_len);
+                                    (struct sockaddr *)&direccion_origen,
+                                    &longitud_origen);
 
-        if (received < 0) {
+        if (recibido < 0) {
             perror("recvfrom");
             break;
         }
 
-        if (packet.type != MSG_TYPE_DATA) {
+        if (paquete.type != MSG_TYPE_DATA) {
             continue;
         }
 
-        printf("Mensaje recibido seq=%u: %s", packet.seq, packet.payload);
+        printf("Mensaje recibido seq=%u: %s", paquete.seq, paquete.payload);
     }
 
     close(sockfd);
