@@ -23,8 +23,9 @@
  *     al reordenamiento de segmentos TCP en el receptor real).
  *   - Cierre ordenado con FIN-ACK cuando el usuario termina.
  *
- * COMPILACION:
- *   gcc -std=c11 -Wall -o subscriber subscriber_tcp.c -lpthread
+ * COMPILACION (enlazar junto con connections.c, broker y publisher):
+ *   gcc -std=c11 -Wall -o sim \
+ *       connections.c broker_tcp.c publisher_tcp.c subscriber_tcp.c -lpthread
  *
  * EJECUCION:
  *   ./subscriber <id_conexion>
@@ -39,12 +40,9 @@
 #include <time.h>
 #include <threads.h>
 #include "tcp_sim.h"
+/* connections[], conn_count y conn_table_mutex se obtienen
+ * via extern desde tcp_sim.h (definidos en connections.c). */
  
-/* Referencia a la tabla global de conexiones del broker */
-extern tcp_conn_t connections[TCP_MAX_CONNS];
- 
-/* Contador de mensajes recibidos (para verificar entrega completa) */
-static int messages_received = 0;
  
 /* ============================================================
  * HANDSHAKE TCP DE 3 VIAS — LADO CLIENTE (SUBSCRIBER)
@@ -108,6 +106,7 @@ static bool subscriber_connect(tcp_conn_t *conn) {
 static int recv_thread(void *arg) {
     tcp_conn_t *conn = (tcp_conn_t *)arg;
     tcp_segment_t seg;
+    int messages_received = 0;  /* Local: cada hilo suscriptor lleva su propio contador */
  
     printf("╔══════════════════════════════════════════╗\n");
     printf("║   ACTUALIZACIONES EN VIVO                ║\n");
@@ -161,7 +160,7 @@ static int recv_thread(void *arg) {
  
     printf("\n[SUB][conn=%d] Total de mensajes recibidos: %d\n",
            conn->conn_id, messages_received);
-    return 0;
+    return messages_received;  /* thrd_join() captura este valor */
 }
  
 /* ============================================================
@@ -189,20 +188,15 @@ static void subscriber_close(tcp_conn_t *conn) {
 /* ============================================================
  * PROGRAMA PRINCIPAL DEL SUBSCRIBER
  * ============================================================ */
-int main(int argc, char *argv[]) {
-    if (argc < 2) {
-        fprintf(stderr, "Uso: ./subscriber <id_conexion 0-%d>\n",
-                TCP_MAX_CONNS - 1);
-        fprintf(stderr, "Ejemplo: ./subscriber 2\n");
-        exit(EXIT_FAILURE);
-    }
+int subscriber_run(void *arg) {
+    sub_args_t *a    = (sub_args_t *)arg;
+    int         conn_id = a->conn_id;
  
     srand((unsigned)time(NULL));
  
-    int conn_id = atoi(argv[1]);
     if (conn_id < 0 || conn_id >= TCP_MAX_CONNS) {
         fprintf(stderr, "[SUB] ID de conexion invalido: %d\n", conn_id);
-        exit(EXIT_FAILURE);
+        return thrd_error;
     }
  
     tcp_conn_t *conn = &connections[conn_id];
@@ -221,15 +215,15 @@ int main(int argc, char *argv[]) {
     thrd_t rx_thread;
     thrd_create(&rx_thread, recv_thread, conn);
  
-    /* Esperar instruccion de salida del usuario */
-    printf("Presiona ENTER para desconectarse del broker...\n\n");
-    getchar();
+    /* Esperar a que los publicadores terminen (timeout configurado en sub_args_t) */
+    struct timespec ts = { (time_t)a->duration_sec, 0L };
+    thrd_sleep(&ts, NULL);
  
     /* Cerrar la conexion ordenadamente */
     subscriber_close(conn);
-    thrd_join(rx_thread, NULL);
+    int msg_count = 0;
+    thrd_join(rx_thread, &msg_count);
  
-    printf("[SUB] Suscriptor finalizado. Mensajes recibidos: %d\n",
-           messages_received);
-    return 0;
+    printf("[SUB] Suscriptor finalizado. Mensajes recibidos: %d\n", msg_count);
+    return thrd_success;
 }

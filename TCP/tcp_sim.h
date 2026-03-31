@@ -218,4 +218,24 @@ static inline const char *tcp_state_name(tcp_state_t s) {
     }
 }
  
+/* ============================================================
+ * ESTADO COMPARTIDO — definido en connections.c
+ * Todos los modulos (broker, publisher, subscriber) ven estas
+ * variables a traves de esta declaracion extern.
+ * ============================================================ */
+extern tcp_conn_t connections[TCP_MAX_CONNS];
+extern int        conn_count;
+extern mtx_t      conn_table_mutex;
+ 
+/* ============================================================
+ * ARGUMENTOS DE HILO Y DECLARACIONES DE LOS ROLES
+ * Permiten pasar parametros a las funciones de hilo.
+ * ============================================================ */
+typedef struct { int conn_id; const char *partido; } pub_args_t;
+typedef struct { int conn_id; int duration_sec; }     sub_args_t;
+ 
+int broker_run(void *arg);
+int publisher_run(void *arg);
+int subscriber_run(void *arg);
+ 
 #endif /* TCP_SIM_H */

@@ -24,8 +24,9 @@
  *   - Cierre ordenado con FIN / ACK (equivalente al cierre de 4 vias de TCP).
  *   - Cada cliente tiene su propio hilo receptor en el broker (como un FD TCP).
  *
- * COMPILACION:
- *   gcc -std=c11 -Wall -o broker broker_tcp.c -lpthread
+ * COMPILACION (enlazar junto con connections.c, publisher y subscriber):
+ *   gcc -std=c11 -Wall -o sim \
+ *       connections.c broker_tcp.c publisher_tcp.c subscriber_tcp.c -lpthread
  *
  * EJECUCION:
  *   ./broker
@@ -43,11 +44,9 @@
 /* ============================================================
  * TABLA GLOBAL DE CONEXIONES
  * Equivale a la tabla de sockets del kernel para el servidor.
- * Cada entrada es un canal TCP full-duplex con un cliente.
+ * Definida en connections.c — aqui se usa directamente via
+ * la declaracion extern de tcp_sim.h.
  * ============================================================ */
-static tcp_conn_t connections[TCP_MAX_CONNS];
-static int        conn_count = 0;
-static mtx_t      conn_table_mutex;   /* Protege conn_count y connections[]  */
  
 /* ============================================================
  * HANDSHAKE TCP DE 3 VIAS — LADO SERVIDOR (BROKER)
@@ -199,7 +198,8 @@ static int broker_client_thread(void *arg) {
  * Simula accept() en un bucle: espera que los clientes
  * inicialicen una conexion y lanza un hilo receptor por cada una.
  * ============================================================ */
-int main(void) {
+int broker_run(void *arg) {
+    (void)arg;
     srand((unsigned)time(NULL));
     mtx_init(&conn_table_mutex, mtx_plain);
  
@@ -245,5 +245,5 @@ int main(void) {
     }
  
     mtx_destroy(&conn_table_mutex);
-    return 0;
+    return thrd_success;
 }

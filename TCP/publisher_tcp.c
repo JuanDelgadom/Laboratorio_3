@@ -22,8 +22,9 @@
  *     (simula la ventana deslizante con window=1 para simplicidad).
  *   - Cierre ordenado con FIN al terminar.
  *
- * COMPILACION:
- *   gcc -std=c11 -Wall -o publisher publisher_tcp.c -lpthread
+ * COMPILACION (enlazar junto con connections.c, broker y subscriber):
+ *   gcc -std=c11 -Wall -o sim \
+ *       connections.c broker_tcp.c publisher_tcp.c subscriber_tcp.c -lpthread
  *
  * EJECUCION:
  *   ./publisher <id_conexion> <partido>
@@ -38,11 +39,8 @@
 #include <time.h>
 #include <threads.h>
 #include "tcp_sim.h"
- 
-/* Referencia a la tabla global de conexiones del broker.
- * En un sistema real esto seria un socket FD + IP:puerto.
- * Aqui es un puntero compartido en memoria (mismo proceso). */
-extern tcp_conn_t connections[TCP_MAX_CONNS];
+/* connections[], conn_count y conn_table_mutex se obtienen
+ * via extern desde tcp_sim.h (definidos en connections.c). */
  
 /* ============================================================
  * HANDSHAKE TCP DE 3 VIAS — LADO CLIENTE (PUBLISHER)
@@ -181,23 +179,18 @@ static void publisher_close(tcp_conn_t *conn) {
 /* ============================================================
  * PROGRAMA PRINCIPAL DEL PUBLISHER
  * ============================================================ */
-int main(int argc, char *argv[]) {
-    if (argc < 3) {
-        fprintf(stderr, "Uso: ./publisher <id_conexion 0-%d> <\"partido\">\n",
-                TCP_MAX_CONNS - 1);
-        fprintf(stderr, "Ejemplo: ./publisher 0 \"Colombia vs Brasil\"\n");
-        exit(EXIT_FAILURE);
-    }
+int publisher_run(void *arg) {
+    pub_args_t *a       = (pub_args_t *)arg;
+    int         conn_id = a->conn_id;
+    const char *partido = a->partido;
  
     srand((unsigned)time(NULL));
  
-    int conn_id = atoi(argv[1]);
     if (conn_id < 0 || conn_id >= TCP_MAX_CONNS) {
         fprintf(stderr, "[PUB] ID de conexion invalido: %d\n", conn_id);
-        exit(EXIT_FAILURE);
+        return thrd_error;
     }
  
-    const char *partido = argv[2];
     tcp_conn_t *conn    = &connections[conn_id];
  
     printf("╔══════════════════════════════════════════╗\n");
@@ -215,37 +208,41 @@ int main(int argc, char *argv[]) {
     thrd_t ack_thread;
     thrd_create(&ack_thread, ack_receiver_thread, conn);
  
-    /* Bucle de publicacion: leer mensajes de stdin y enviarlos */
-    char input[TCP_MAX_PAYLOAD];
+    /* Mensajes predefinidos del partido — requerimiento: >= 10 mensajes */
+    static const char *const sport_events[] = {
+        "Inicio del partido\n",
+        "Gol del equipo local al minuto 8 — 1-0\n",
+        "Tiro al arco rechazado por el portero al minuto 15\n",
+        "Tarjeta amarilla al jugador 7 al minuto 22\n",
+        "Gol del equipo visitante al minuto 28 — 1-1\n",
+        "Cambio: jugador 15 entra por jugador 9 al minuto 35\n",
+        "Gol del equipo local al minuto 44 — 2-1\n",
+        "Fin del primer tiempo. Marcador: 2-1\n",
+        "Inicio del segundo tiempo\n",
+        "Tarjeta roja al jugador 4 al minuto 58\n",
+        "Gol del equipo local al minuto 73 — 3-1\n",
+        "Fin del partido. Resultado final: 3-1\n",
+    };
+    int num_events = (int)(sizeof(sport_events) / sizeof(sport_events[0]));
     char message[TCP_MAX_PAYLOAD + 64];
  
-    printf("\nEscribe eventos del partido (ENTER para enviar, 'q' para salir):\n");
-    printf("Ejemplos: 'Gol de Colombia al minuto 32'\n\n");
+    printf("\n[PUB][conn=%d] Enviando %d eventos del partido...\n\n",
+           conn_id, num_events);
  
-    while (1) {
-        printf("[%s] > ", partido);
-        if (!fgets(input, sizeof(input), stdin)) break;
- 
-        /* Quitar el newline al final */
-        size_t len = strlen(input);
-        if (len > 0 && input[len - 1] == '\n') input[len - 1] = '\0';
- 
-        if (input[0] == 'q' && input[1] == '\0') break;
-        if (input[0] == '\0') continue;
- 
-        /* Formatear el mensaje con el nombre del partido */
-        snprintf(message, sizeof(message), "[%s] %s\n", partido, input);
+    for (int i = 0; i < num_events; i++) {
+        snprintf(message, sizeof(message), "[%s] %s", partido, sport_events[i]);
         publisher_send(conn, message);
  
-        /* Pausa minima para simular latencia de red */
-        struct timespec ts = {0, 5000000L}; /* 5 ms */
+        /* Pausa entre mensajes para simular retardo de red (200 ms) */
+        struct timespec ts = {0, 200000000L};
         thrd_sleep(&ts, NULL);
     }
+    printf("[PUB][conn=%d] %d mensajes enviados.\n", conn_id, num_events);
  
     /* Cerrar la conexion ordenadamente */
     publisher_close(conn);
     thrd_join(ack_thread, NULL);
  
     printf("[PUB] Publisher finalizado.\n");
-    return 0;
+    return thrd_success;
 }
