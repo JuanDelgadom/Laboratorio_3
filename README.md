@@ -11,3 +11,4 @@ Proyecto con implementaciones de un sistema publisher-subscriber en `TCP` y `UDP
 - `*.s`: implementaciones en Assembly.
 - `broker_udp_prueba.*`: versiones de prueba para simular perdida de paquetes y observar retransmision.
 - `udp_common.h`: definiciones compartidas del protocolo UDP.
+- `Laboratorio 3`: Documento de analsis y procedimiento.
